@@ -1,0 +1,18 @@
+\set QUIET on
+\pset linestyle unicode
+\set HISTCONTROL ignoreboth
+\set HISTSIZE 10000
+\set PSQL_EDITOR 'vim -c ":set ft=sql"'
+\set c 'select count(1) from '
+\set l 'select c.relname, sa1.pid as locked_pid, sa1.query as locked_query, sa2.pid, sa2.usename, sa2.query as locking_query, now() - sa2.query_start as duration from pg_stat_activity sa1, pg_locks l1, pg_locks l2, pg_class c, pg_stat_activity sa2 where sa1.waiting and l1.pid = sa1.pid and not l1.granted and l2.relation = l1.relation and l2.granted and c.oid = l2.relation and sa2.pid = l2.pid;'
+\set iir 'SELECT pg_is_in_recovery();'
+\set cc 'SELECT count(1) from pg_stat_activity;'
+\set ccg 'SELECT datname, usename, count(1) from pg_stat_activity group by datname, usename order by 1, 3 desc ;'
+\set v 'SELECT * from _v.patches order by applied_tsz desc limit 10;'
+\set cs 'SELECT usename, count(1) from pg_stat_activity group by usename order by count(1) desc limit 10';
+\set aq92 'select now() - query_start as running, * from pg_stat_activity where state != ''idle'' order by running desc limit 10';
+\set aq91 'select now() - query_start as running, * from pg_stat_activity where current_query != ''<IDLE>'' order by running desc limit 10';
+\set QUIET off
+\pset null ¤
+\x auto
+;\set PROMPT1 '%n@%/=%#%x '
