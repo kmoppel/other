@@ -112,10 +112,10 @@ index d2b813d..73aeead 100644
  					query_buf->len == 0)
 diff --git a/src/bin/psql/psql_magic.c b/src/bin/psql/psql_magic.c
 new file mode 100644
-index 0000000..05a605c
+index 0000000..734f8fe
 --- /dev/null
 +++ b/src/bin/psql/psql_magic.c
-@@ -0,0 +1,459 @@
+@@ -0,0 +1,460 @@
 +#include "postgres_fe.h"
 +
 +
@@ -161,7 +161,8 @@ index 0000000..05a605c
 +            "FROM (\n"
 +            "	SELECT c.oid, quote_ident(n.nspname)||'.'||quote_ident(c.relname) AS full_name\n"
 +            "	FROM pg_class c join pg_namespace n on n.oid = c.relnamespace\n"
-+            "    WHERE relkind = 'r' ) a\n"
++            "   WHERE relkind = 'r'\n"
++            "   AND n.nspname != 'information_schema' AND NOT n.nspname LIKE 'pg\\_%') a\n"
 +            "WHERE lower(full_name) LIKE '%%%s%%'\n"
 +            , pattern);
 +        
@@ -173,7 +174,7 @@ index 0000000..05a605c
 +	if (PQntuples(res) == 0)
 +	{
 +		if (!pset.quiet)
-+			psql_error("Did not find any relation named \"%s\".\n",
++			psql_error("Did not find any relations for pattern \"%%%s%%\".\n",
 +					   pattern);
 +		PQclear(res);
 +		return NULL;
@@ -181,22 +182,22 @@ index 0000000..05a605c
 +
 +        if (PQntuples(res) > 1)
 +	{
-+		if (!pset.quiet)
-+			psql_error("Too many matches for \"%s\".\n",
-+					   pattern);
-+        
++            int use1st = GetVariableNum(pset.vars, "psql_magic_use_1st_on_duplicate", 0, 0, false );
++            psql_error("Warning - more than 1 matches for pattern \"%%%s%%\".\n", pattern);
++            
 +            for (i = 0; i < PQntuples(res); i++)
 +            {
 +                    const char *full_name;
 +
 +                    full_name = PQgetvalue(res, i, 0);
-+
-+                    if (!pset.quiet)
-+                        psql_error("%s\n", full_name);
++                    psql_error("%s\n", full_name);
 +
 +            }        
-+            PQclear(res);
-+            return NULL;
++            if (!use1st)
++            {
++                PQclear(res);
++                return NULL;
++            }
 +        }
 +        
 +        if (current_oid)
@@ -577,16 +578,17 @@ index 0000000..05a605c
 +}
 diff --git a/src/bin/psql/psql_magic.h b/src/bin/psql/psql_magic.h
 new file mode 100644
-index 0000000..01d7f11
+index 0000000..c665892
 --- /dev/null
 +++ b/src/bin/psql/psql_magic.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,33 @@
 +/*
 + * psql_magic - conventions based "auto-complete" for better data-skimming
 + * 
 + * these rows should be customized and added to .psqlrc
-+\set psql_magic_default_row_limit 5
++\set psql_magic_default_row_limit 1
 +\set psql_magic_default_order_by_direction 1
++\set psql_magic_use_1st_on_duplicate 1
 +\set psql_magic_created_column_patterns created,timestamp
 +\set psql_magic_modified_column_patterns modified,updated,timestamp
 + */
