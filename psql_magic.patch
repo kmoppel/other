@@ -12,7 +12,7 @@ index 3a42cae..1492150 100644
  
  
 diff --git a/src/bin/psql/command.c b/src/bin/psql/command.c
-index fd64ba8..be12ed4 100644
+index fd64ba8..743a36e 100644
 --- a/src/bin/psql/command.c
 +++ b/src/bin/psql/command.c
 @@ -51,6 +51,7 @@
@@ -32,7 +32,7 @@ index fd64ba8..be12ed4 100644
  	if (status == PSQL_CMD_UNKNOWN)
  	{
  		if (pset.cur_cmd_interactive)
-@@ -1504,6 +1505,64 @@ exec_command(const char *cmd,
+@@ -1504,6 +1505,61 @@ exec_command(const char *cmd,
  	/* \? -- slash command help */
  	else if (strcmp(cmd, "?") == 0)
  		slashUsage(pset.popt.topt.pager);
@@ -42,56 +42,53 @@ index fd64ba8..be12ed4 100644
 +	{
 +		char	   *cmd_params = psql_scan_slash_option(scan_state, OT_WHOLE_LINE, NULL, false);
 +                char *table_name = NULL;
-+                char *sql;
-+                char **tokens;
++                char *sql = NULL;
++                char **tokens = NULL;
 +                int i;
 +                PQExpBuffer history_buf;
 +                
 +                // if not overwritten will send the buffer for execution
-+                status = PSQL_CMD_SEND;
++                status = PSQL_CMD_ERROR;
 +                
 +                if (cmd_params != NULL) {
 +                
 +                    tokens = string_to_tokens(cmd_params);
++                    if (tokens) {
++                        table_name = search_table_by_abbr(tokens[0]);                
 +
-+                    table_name = search_table_by_abbr(tokens[0]);                
++                        if (table_name)
++                        {
++                            strcpy(tokens[0], table_name);
++                            sql = tokens_to_sql(tokens);
 +
-+                    if (table_name)
-+                    {
-+                        strcpy(tokens[0], table_name);
-+                        sql = tokens_to_sql(tokens);
++                            if (sql) {
++                                printf("%s\n", sql);    //show generated sql on console
 +
-+                        if (sql) {
-+                            printf("%s\n", sql);    //show generated sql on console
++                                // for history
++                                history_buf = createPQExpBuffer();
++                                pg_append_history(sql, history_buf);
++                                pg_send_history(history_buf);
++                                resetPQExpBuffer(history_buf);
 +
-+                            // for history
-+                            history_buf = createPQExpBuffer();
-+                            pg_append_history(sql, history_buf);
-+                            pg_send_history(history_buf);
-+                            resetPQExpBuffer(history_buf);
++                                // for execution
++                                resetPQExpBuffer(query_buf);
++                                appendPQExpBufferStr(query_buf, sql);
 +
-+                            // for execution
-+                            resetPQExpBuffer(query_buf);
-+                            appendPQExpBufferStr(query_buf, sql);
-+
-+                            // free memory
-+                            for (i = 0; i < PM_MAX_TOKENS; i++) {
-+                                free(tokens[i]);
++                                // free memory
++                                for (i = 0; i < PM_MAX_TOKENS; i++) {
++                                    free(tokens[i]);
++                                }
++                                free(tokens);
++                                free(sql);
 +                            }
-+                            free(tokens);
-+                            free(sql);
++                            free(table_name);
++                            status = PSQL_CMD_SEND;
 +                        }
-+                        free(table_name);
-+                    }
-+                    else
-+                    {
-+                        status = PSQL_CMD_ERROR;
 +                    }
 +                    free(cmd_params);
 +                }
 +                else {
 +                    print_magic_help();
-+                    status = PSQL_CMD_ERROR;
 +                }                    
 +	}
  
@@ -112,10 +109,10 @@ index d2b813d..73aeead 100644
  					query_buf->len == 0)
 diff --git a/src/bin/psql/psql_magic.c b/src/bin/psql/psql_magic.c
 new file mode 100644
-index 0000000..734f8fe
+index 0000000..17958e5
 --- /dev/null
 +++ b/src/bin/psql/psql_magic.c
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,521 @@
 +#include "postgres_fe.h"
 +
 +
@@ -133,7 +130,7 @@ index 0000000..734f8fe
 +
 +void print_magic_help()
 +{
-+    printf("\npsql_magic usage: \"\\* table_pattern [o|od|oa|oc|oca|ocd|om|oma|omd] [lX]\"\n\n");
++    printf("\npsql_magic usage 1: \"\\* table_pattern [o|od|oa|oc|oca|ocd|om|oma|omd] [lX]\"\n\n");
 +    printf("\ttable_pattern - \"*\" can be used for wildcards. full table names (with schema) will be searched\n");
 +    printf("\t[o|od|oa|oc|oca|ocd|om|oma|omd] - optional order by clause\n");
 +    printf("\t\twhere:\n");
@@ -141,6 +138,12 @@ index 0000000..734f8fe
 +    printf("\t\t[c|m] -> [created|modified]. column patterns defined by psql_magic_created_column_patterns variable \n");
 +    printf("\t\t[a|d] -> [asc|desc]. column patterns defined by psql_magic_created_column_patterns variable \n");
 +    printf("\t[lX] - optional \"limit X\" clause. if not specified default \"limit\" defined by psql_magic_default_row_limit wil be used\n");
++
++    printf("\npsql_magic usage 2: \"\\* table_pattern w[here] column_pattern column_value\"\n\n");
++    printf("\ttable_pattern - \"*\" can be used for wildcards. full table names (with schema) will be searched\n");
++    printf("\tcolumn_pattern - \"*\" can be used for wildcards\n");
++    printf("\tcolumn_value - quotes will be added automatically\n");
++
 +}
 +
 +char *get_current_oid() {
@@ -323,13 +326,17 @@ index 0000000..734f8fe
 +    return ret;    
 +}
 +
++int
++get_default_limit() {
++    return GetVariableNum(pset.vars, "psql_magic_default_row_limit", 5, 5, false);
++}
++
 +char *
 +get_table(char *table_name)
 +{
 +    char *ret_sql = pg_malloc(PM_MAX_STATEMENT_CHARS);
-+    int default_limit = GetVariableNum(pset.vars, "psql_magic_default_row_limit", 5, 5, false);
 +    
-+    snprintf(ret_sql, PM_MAX_STATEMENT_CHARS, "SELECT * FROM %s LIMIT %d;", table_name, default_limit);
++    snprintf(ret_sql, PM_MAX_STATEMENT_CHARS, "SELECT * FROM %s LIMIT %d;", table_name, get_default_limit());
 +    
 +    return ret_sql;
 +}
@@ -348,11 +355,10 @@ index 0000000..734f8fe
 +get_table_order(char *table_name, char *order_by_column, int order_by)
 +{
 +    char *ret_sql = pg_malloc(PM_MAX_STATEMENT_CHARS);
-+    int default_limit = GetVariableNum(pset.vars, "psql_magic_default_row_limit", 5, 5, false);
 +    char *order_by_str = order_by == 0 ? "" : "DESC";
 +    
 +    snprintf(ret_sql, PM_MAX_STATEMENT_CHARS, "SELECT * FROM %s ORDER BY %s %s LIMIT %d;",
-+             table_name, order_by_column, order_by_str, default_limit);
++             table_name, order_by_column, order_by_str, get_default_limit());
 +    
 +    return ret_sql;    
 +}
@@ -367,6 +373,16 @@ index 0000000..734f8fe
 +             table_name, order_by_column, ob_direction_str, limit);
 +    
 +    return ret_sql;    
++}
++
++char *
++get_table_by_column_value(char *table_name, char *column_name, char *column_value)
++{
++    char *ret_sql = pg_malloc(PM_MAX_STATEMENT_CHARS);
++    snprintf(ret_sql, PM_MAX_STATEMENT_CHARS, "SELECT * FROM %s WHERE %s = %s LIMIT %d;",
++             table_name, column_name, column_value, get_default_limit());
++    
++    return ret_sql;        
 +}
 +
 +char *
@@ -397,14 +413,35 @@ index 0000000..734f8fe
 +}
 +
 +char *
++quote_string_if_not_quoted(char *input_string)
++{
++    char *ret_str;
++
++    if (input_string[0] == '\'')    //already quoted, just copy
++    {
++        ret_str = malloc(strlen(input_string) + 1);
++        strcpy(ret_str, input_string);
++    }
++    else
++    {
++        ret_str = malloc(strlen(input_string) + 3);
++        sprintf(ret_str, "'%s'", input_string);
++    }
++    return ret_str;
++}
++
++char *
 +do_process_tokens(char** tokens, int tokencount)
 +{
 +    char *ret, *table_token = NULL, *ob_token = NULL, *limit_token = NULL;
-+    char *order_by_column, *limit_value;
++    char *order_by_column = NULL, *limit_value = NULL, *id_column = NULL, *id_value = NULL;
 +    char order_by_char = ' ', order_col_char = ' ', ob_c1, ob_c2, ob_c3;
 +    int order_by_direction;
 +
-+//    printf("%s %s %s\n", tokens[0], tokens[1], tokens[2]);
++//    int i;
++//    for (i = 0; i < PM_MAX_TOKENS; i++)
++//        if (tokens[i])
++//            printf("token %d: %s\n", i, tokens[i]);
 +    
 +    /* tbl_pattern only */
 +    if (tokencount == 1) {
@@ -430,6 +467,10 @@ index 0000000..734f8fe
 +            limit_token = tokens[2];
 +        }
 +    }
++    else if (tokencount == 4 && tokens[1][0] == 'w') { // tbl w id_pattern id_val
++        id_column = tokens[2];            
++        id_value = tokens[3];           
++    }    
 +    else
 +    {
 +        printf("invalid \\* syntax!\n");
@@ -506,7 +547,18 @@ index 0000000..734f8fe
 +            return NULL;
 +        }        
 +    }
-+            
++    
++    if (id_column) {
++        char *id_column_full, *id_value_full;
++        id_column_full = find_column_by_patterns(table_token, id_column);
++        if (id_column_full == NULL)
++            return NULL;
++        id_value_full = quote_string_if_not_quoted(id_value);
++        ret = get_table_by_column_value(table_token, id_column_full, id_value_full);
++        free(id_column_full);
++        free(id_value_full);
++    }
++    
 +    if (ob_token && !limit_token) {        
 +        ret = get_table_order(table_token, order_by_column, order_by_direction);
 +        free(order_by_column);
@@ -543,7 +595,7 @@ index 0000000..734f8fe
 +    tokens = pg_malloc(PM_MAX_TOKENS * sizeof(char*));
 +    for (i = 0; i < PM_MAX_TOKENS; i++) {
 +        tokens[i] = pg_malloc(256);
-+        strcpy(tokens[i], "\0");
++        tokens[i][0] = '\0';
 +    }
 +
 +    strcpy(tokens[_token_count++], token);
@@ -552,8 +604,14 @@ index 0000000..734f8fe
 +        token = strtokx(NULL, whitespace, "", "\"",
 +                                    0, false, false, pset.encoding);
 +        if (token) {
++            if (_token_count == PM_MAX_TOKENS) {
++                printf("Too many input tokens!");
++                print_magic_help();
++                return NULL;
++            }                
 +            strcpy(tokens[_token_count++], token);
 +        }
++        
 +    } while (token);        
 +    
 +    // replace * with % for 1st token
@@ -578,7 +636,7 @@ index 0000000..734f8fe
 +}
 diff --git a/src/bin/psql/psql_magic.h b/src/bin/psql/psql_magic.h
 new file mode 100644
-index 0000000..c665892
+index 0000000..998e151
 --- /dev/null
 +++ b/src/bin/psql/psql_magic.h
 @@ -0,0 +1,33 @@
@@ -596,7 +654,7 @@ index 0000000..c665892
 +#ifndef PSQL_MAGIC_H
 +#define PSQL_MAGIC_H
 +
-+#define PM_MAX_TOKENS 3
++#define PM_MAX_TOKENS 4
 +#define PM_MAX_STATEMENT_CHARS 256
 +
 +void
