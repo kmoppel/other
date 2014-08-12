@@ -109,10 +109,10 @@ index c3aff20..e27f4ba 100644
  					query_buf->len == 0)
 diff --git a/src/bin/psql/psql_magic.c b/src/bin/psql/psql_magic.c
 new file mode 100644
-index 0000000..d5e4878
+index 0000000..0c6434a
 --- /dev/null
 +++ b/src/bin/psql/psql_magic.c
-@@ -0,0 +1,522 @@
+@@ -0,0 +1,537 @@
 +#include "postgres_fe.h"
 +
 +
@@ -127,6 +127,22 @@ index 0000000..d5e4878
 +
 +// filled when search for table succeeds
 +char *current_oid = NULL;
++
++// prototypes
++char *get_current_oid(void);
++char *find_column_by_patterns(char *table_name, const char *patterns);
++char *get_pk_as_text_by_oid(char *oid);
++int get_default_limit(void);
++char *get_table(char *table_name);
++char *get_table_with_limit(char *table_name, char *limit);
++char *get_table_order(char *table_name, char *order_by_column, int order_by);
++char *get_table_order_limit(char *table_name, char *order_by_column, int ob_direction, char *limit);
++char *get_table_by_column_value(char *table_name, char *column_name, char *column_value);
++const char *get_created_column_patterns(void);
++const char *get_modified_column_patterns(void);
++int get_default_order_by_direction(void);
++char *quote_string_if_not_quoted(char *input_string);
++char *do_process_tokens(char** tokens, int tokencount);
 +
 +void print_magic_help()
 +{
@@ -165,7 +181,7 @@ index 0000000..d5e4878
 +            "	SELECT c.oid, quote_ident(n.nspname)||'.'||quote_ident(c.relname) AS full_name\n"
 +            "	FROM pg_class c join pg_namespace n on n.oid = c.relnamespace\n"
 +            "   WHERE relkind = 'r'\n"
-+            "   AND n.nspname != 'information_schema' AND NOT n.nspname LIKE 'pg\\_%') a\n"
++            "   AND n.nspname != 'information_schema' AND NOT n.nspname LIKE 'pg\\_%%'\n"
 +            "   ORDER BY length(quote_ident(n.nspname)||'.'||quote_ident(c.relname))) a\n"    
 +            "WHERE lower(full_name) LIKE '%%%s%%'\n"
 +            , pattern);
@@ -218,7 +234,7 @@ index 0000000..d5e4878
 +}
 +
 +char *
-+find_column_by_patterns(char *table_name, char *patterns)
++find_column_by_patterns(char *table_name, const char *patterns)
 +{
 +    PQExpBufferData buf;
 +    PGresult   *res;
@@ -288,7 +304,6 @@ index 0000000..d5e4878
 +char *get_pk_as_text_by_oid(char *oid) {
 +    PQExpBufferData buf;
 +    PGresult   *res;
-+    int			i;
 +    char        *ret;
 +    char        *temp;
 +
@@ -386,22 +401,22 @@ index 0000000..d5e4878
 +    return ret_sql;        
 +}
 +
-+char *
++const char *
 +get_created_column_patterns() {   
-+    char *created_columns = GetVariable(pset.vars, "psql_magic_created_column_patterns");
++    const char *created_columns = GetVariable(pset.vars, "psql_magic_created_column_patterns");
 +    
 +    if (created_columns == NULL)
-+        created_columns = "created";
++        return "created";
 +    
 +    return created_columns;
 +}
 +
-+char *
++const char *
 +get_modified_column_patterns() {   
-+    char *modified_columns = GetVariable(pset.vars, "psql_magic_modified_column_patterns");
++    const char *modified_columns = GetVariable(pset.vars, "psql_magic_modified_column_patterns");
 +    
 +    if (modified_columns == NULL)
-+        modified_columns = "modified";
++        return "modified";
 +    
 +    return modified_columns;
 +}
@@ -434,10 +449,10 @@ index 0000000..d5e4878
 +char *
 +do_process_tokens(char** tokens, int tokencount)
 +{
-+    char *ret, *table_token = NULL, *ob_token = NULL, *limit_token = NULL;
++    char *ret = NULL, *table_token = NULL, *ob_token = NULL, *limit_token = NULL;
 +    char *order_by_column = NULL, *limit_value = NULL, *id_column = NULL, *id_value = NULL;
 +    char order_by_char = ' ', order_col_char = ' ', ob_c1, ob_c2, ob_c3;
-+    int order_by_direction;
++    int order_by_direction = 0;
 +
 +//    int i;
 +//    for (i = 0; i < PM_MAX_TOKENS; i++)
@@ -528,14 +543,14 @@ index 0000000..d5e4878
 +            }
 +            else if (ob_token_len > 1 && order_col_char == 'c')
 +            {
-+                char *column_patterns = get_created_column_patterns();
++                const char *column_patterns = get_created_column_patterns();
 +                order_by_column = find_column_by_patterns(table_token, column_patterns);
 +                if (order_by_column == NULL)
 +                    return NULL;
 +            }
 +            else if (ob_token_len > 1 && order_col_char == 'm')
 +            {
-+                char *column_patterns = get_modified_column_patterns();
++                const char *column_patterns = get_modified_column_patterns();
 +                order_by_column = find_column_by_patterns(table_token, column_patterns);
 +                if (order_by_column == NULL)
 +                    return NULL;
@@ -637,10 +652,10 @@ index 0000000..d5e4878
 +}
 diff --git a/src/bin/psql/psql_magic.h b/src/bin/psql/psql_magic.h
 new file mode 100644
-index 0000000..998e151
+index 0000000..9df0bc1
 --- /dev/null
 +++ b/src/bin/psql/psql_magic.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,30 @@
 +/*
 + * psql_magic - conventions based "auto-complete" for better data-skimming
 + * 
@@ -658,17 +673,14 @@ index 0000000..998e151
 +#define PM_MAX_TOKENS 4
 +#define PM_MAX_STATEMENT_CHARS 256
 +
-+void
-+print_magic_help();
++extern void
++print_magic_help(void);
 +
 +extern char **
 +string_to_tokens(char* token_str);
 +
 +extern char *
 +search_table_by_abbr(const char *abbr);
-+
-+extern char *
-+get_current_oid();
 +
 +extern char *
 +tokens_to_sql(char **tokens);
