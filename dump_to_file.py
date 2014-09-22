@@ -3,8 +3,11 @@
 # Plugin by Kaarel Moppel <kaarel.moppel@gmail.com>
 # See LICENSE of Terminator package.
 
-""" dump_to_file.py - Terminator Plugin to save text content of individual
-terminals to ~/.terminator directory"""
+"""
+dump_to_file.py - Terminator Plugin to save text content of individual terminals to ~/.terminator directory.
+Does not need annoying explicit starting of logging like the official "logger" plugin, but will also save only
+data thats currently in the scrollback buffer.(so better increase the default buffer size - Preferences->Profiles->Scrolling)
+"""
 
 import os
 import sys
@@ -34,15 +37,16 @@ class DumpToFile(plugin.MenuItem):
                         
     def dump_console(self, _widget, Terminal):
         """ Handle menu item callback by saving console text to a predefined location and creating the ~/.terminator folder if necessary """
-        # TODO delete logs older than 3m automatically?
         try:
-            path = os.path.expanduser("~") + "/.terminator/"
-            if not os.path.exists(path):
-                os.mkdir(path)
-            filename = "console_" + datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')+".log"
-            fd = open(path + filename, 'w+')
+            log_folder = os.path.expanduser("~") + "/.terminator/"
+            if not os.path.exists(log_folder):
+                os.mkdir(log_folder)
+            log_file = "console_" + datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')+".log"
+            fd = open(log_folder + log_file, 'w+')
             vte_terminal = Terminal.get_vte()
-            fd.write(vte_terminal.get_text(lambda *a: True).strip() + "\n")
+            col, row = vte_terminal.get_cursor_position()
+            content = vte_terminal.get_text_range(0, 0, row, col, lambda *a: True)
+            fd.write(content.strip() + "\n")
             fd.flush()
         except Exception as e:
             print e
