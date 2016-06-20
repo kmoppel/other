@@ -17,8 +17,11 @@ alias gd='git diff'
 alias gdnp='git --no-pager diff'
 alias gdc='git diff --cached'
 alias gca='git commit -a'
-alias gl='git --no-pager log -5'
+alias gl='git --no-pager log -3'
 alias zebra="nohup python /home/kmoppel/code/pgtools/pgzebra/src/web.py -c /home/kmoppel/code/pgtools/pgzebra/pgzebra.yaml.live &> /home/kmoppel/pgtools/pgzebra/pgzebra.log &"
+alias dl='cd ~/Downloads'
+alias temp='cd /data/temp'
+
 
 function gup() {
     # goes into all subdirs and does a git pull --rebase on them if they have a .git folder
@@ -41,9 +44,9 @@ export PATH=$PATH:/home/kmoppel/code/pgtools/pgstats
 export PATH=$PATH:/home/kmoppel/code/pgtools/pgbadger
 export EDITOR="/usr/bin/vim"
 export PAGER=less
-export BROWSER=/usr/bin/chromium-browser
+export BROWSER=/usr/bin/google-chrome
 export LESS='-i'
-export T=/home/kmoppel/temp
+export T=/data/temp
 export PGHOST=localhost
 export PGUSER=kmoppel
 export PGDATABASE=postgres
