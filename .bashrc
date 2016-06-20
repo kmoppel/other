@@ -1,5 +1,4 @@
-shopt -s autocd
-source /usr/share/autojump/autojump.sh
+source /usr/share/autojump/autojump.bash
 
 alias .2='cd ../../'
 alias .3='cd ../../../'
